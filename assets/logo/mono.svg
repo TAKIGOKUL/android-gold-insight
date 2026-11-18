@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+<g transform="translate(512 512) scale(0.74) translate(-512 -512)">
+  <rect x="226" y="226" width="572" height="572" rx="100" fill="none" stroke="#FFFFFF" stroke-width="30"/>
+  <text x="300" y="330" font-family="Inter" font-weight="700" font-size="64" fill="#FFFFFF">79</text>
+  <text x="512" y="640" text-anchor="middle" font-family="Instrument Serif" font-size="360" fill="#FFFFFF">In</text>
+</g>
+</svg>
