@@ -26,11 +26,12 @@ class Settings {
   String cur = 'USD';
   String lang = 'en';
   bool local = true; // INR: show India price incl. import duty + GST
+  Map<String, double> calib = {}; // metal -> premium over spot, set by matching a price (e.g. SafeGold)
 
   Map<String, dynamic> toJson() => {
         'w': watch.map((e) => e.index).toList(), 'r': rise, 'f': fall, 'fl': flip, 's': spike, 'q': quiet,
         'rd': riseDays, 'fd': fallDays, 'sp': spikePct, 'lv': level, 'p': pri.toList(),
-        't': targets.map((e) => e.toJson()).toList(), 'c': cur, 'l': lang, 'lo': local,
+        't': targets.map((e) => e.toJson()).toList(), 'c': cur, 'l': lang, 'lo': local, 'cb': calib,
       };
 
   static Settings fromJson(Map<String, dynamic> j) => Settings()
@@ -48,7 +49,8 @@ class Settings {
     ..targets = ((j['t'] as List?) ?? const []).map((e) => Target.fromJson(Map<String, dynamic>.from(e))).toList()
     ..cur = j['c'] ?? 'USD'
     ..lang = j['l'] ?? 'en'
-    ..local = j['lo'] ?? true;
+    ..local = j['lo'] ?? true
+    ..calib = ((j['cb'] as Map?) ?? const {}).map((k, v) => MapEntry(k as String, (v as num).toDouble()));
 
   static Future<Settings> load() async {
     final p = await SharedPreferences.getInstance();
@@ -68,7 +70,7 @@ const ozG = 31.1034768;
 const indiaDuty = {Metal.gold: 0.15, Metal.silver: 0.15, Metal.platinum: 0.154};
 /// India factor: measured market premium when available, else duty + GST formula.
 double localFactor(Settings s, Metal m, [Map<String, double> prem = const {}]) =>
-    (s.cur == 'INR' && s.local) ? (prem[m.name] ?? (1 + indiaDuty[m]!) * 1.03) : 1.0;
+    (s.cur == 'INR' && s.local) ? (s.calib[m.name] ?? prem[m.name] ?? (1 + indiaDuty[m]!) * 1.03) : 1.0;
 
 const currencies = <(String, String)>[('USD', '\$'), ('INR', '₹')];
 

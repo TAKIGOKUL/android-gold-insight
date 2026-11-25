@@ -24,6 +24,7 @@ class Snapshot {
   final double rsi;
   final int trend; // -1, 0, 1
   final bool aboveMa20;
+  final bool maCross; // 20-day average above 50-day
   final double dxyChg;
   final List<Reason> reasons;
   final DateTime at;
@@ -31,7 +32,7 @@ class Snapshot {
   const Snapshot({
     required this.metal, required this.price, required this.dayChg, required this.hourChg,
     required this.streak, required this.last7, required this.sig, required this.prevSig,
-    required this.conf, required this.rsi, required this.trend, required this.aboveMa20,
+    required this.conf, required this.rsi, required this.trend, required this.aboveMa20, this.maCross = false,
     required this.dxyChg, required this.reasons, required this.at,
   });
 
@@ -43,14 +44,14 @@ class Snapshot {
 
   Map<String, dynamic> toJson() => {
         'm': metal.index, 'p': price, 'd': dayChg, 'h': hourChg, 's': streak, 'l7': last7,
-        'sg': sig.index, 'ps': prevSig.index, 'c': conf, 'r': rsi, 't': trend, 'a': aboveMa20,
+        'sg': sig.index, 'ps': prevSig.index, 'c': conf, 'r': rsi, 't': trend, 'a': aboveMa20, 'mx': maCross,
         'x': dxyChg, 'rs': reasons.map((e) => e.toJson()).toList(), 'at': at.millisecondsSinceEpoch,
       };
   factory Snapshot.fromJson(Map<String, dynamic> j) => Snapshot(
         metal: Metal.values[j['m']], price: (j['p'] as num).toDouble(), dayChg: (j['d'] as num).toDouble(),
         hourChg: (j['h'] as num?)?.toDouble(), streak: j['s'], last7: List<int>.from(j['l7']),
         sig: Sig.values[j['sg']], prevSig: Sig.values[j['ps']], conf: j['c'], rsi: (j['r'] as num).toDouble(),
-        trend: j['t'], aboveMa20: j['a'], dxyChg: (j['x'] as num).toDouble(),
+        trend: j['t'], aboveMa20: j['a'], maCross: j['mx'] ?? false, dxyChg: (j['x'] as num).toDouble(),
         reasons: (j['rs'] as List).map((e) => Reason.fromJson(Map<String, dynamic>.from(e))).toList(),
         at: DateTime.fromMillisecondsSinceEpoch(j['at']),
       );
@@ -187,7 +188,7 @@ Snapshot analyze({
 
   return Snapshot(
     metal: metal, price: c.last, dayChg: dayChg, hourChg: hourChg, streak: streak, last7: last7,
-    sig: sig, prevSig: prev, conf: conf, rsi: rsi14(c), trend: trend, aboveMa20: above, dxyChg: dxyChg,
+    sig: sig, prevSig: prev, conf: conf, rsi: rsi14(c), trend: trend, aboveMa20: above, maCross: _sma(c, 20) > _sma(c, 50), dxyChg: dxyChg,
     reasons: reasonsFor(metal, move, dxyChg, tnxChg, news), at: DateTime.now(),
   );
 }

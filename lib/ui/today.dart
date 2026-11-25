@@ -17,8 +17,91 @@ String money(double usd, AppState a) {
   return '${a.sym}$whole${digits > 0 ? '.${parts[1]}' : ''}';
 }
 
+/// Choose what the INR price follows: auto sources, a matched price (e.g. SafeGold), or world spot.
+void _sourceSheet(BuildContext context, AppState a, Snapshot x) {
+  final m = x.metal;
+  final ctrl = TextEditingController(text: (a.perGram(x.price, m) * a.rate).toStringAsFixed(2));
+  final matchName = m == Metal.gold ? 'Match SafeGold 24K' : 'Match my app';
+  showModalBottomSheet<void>(
+    context: context,
+    isScrollControlled: true,
+    backgroundColor: const Color(0x00000000),
+    barrierColor: const Color(0x66000000),
+    builder: (ctx) {
+      Widget option(String title, bool sel, VoidCallback onTap) => Semantics(
+            selected: sel, button: true,
+            child: GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: () { onTap(); Navigator.of(ctx).pop(); },
+              child: Container(
+                height: 52, padding: const EdgeInsets.symmetric(horizontal: 16),
+                decoration: BoxDecoration(borderRadius: BorderRadius.circular(16), color: sel ? const Color(0x1FFFFFFF) : const Color(0x00000000)),
+                child: Row(children: [
+                  Expanded(child: Text(title, style: inter(15, w: FontWeight.w500, c: sel ? C.text : C.sub))),
+                  if (sel) const Icon(Icons.check, size: 18, color: C.gold),
+                ]),
+              ),
+            ),
+          );
+      final calibrated = a.s.calib.containsKey(m.name);
+      return Padding(
+        padding: EdgeInsets.fromLTRB(12, 0, 12, 24 + MediaQuery.of(ctx).viewInsets.bottom),
+        child: Glass(
+          radius: 32, padding: const EdgeInsets.all(10),
+          child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Padding(padding: const EdgeInsets.all(10), child: Text('PRICE SOURCE', style: label())),
+            option('Auto (${m == Metal.gold ? 'Paytm' : (m == Metal.silver ? 'Groww' : 'Market')})', a.s.local && !calibrated,
+                () => a.update((s) { s.local = true; s.calib.remove(m.name); })),
+            option('World spot', !a.s.local, () => a.update((s) => s.local = false)),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+              child: Text(matchName.toUpperCase(), style: label()),
+            ),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: Row(children: [
+                Expanded(
+                  child: TextField(
+                    controller: ctrl,
+                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                    style: serif(32), cursorColor: C.gold,
+                    decoration: InputDecoration(
+                      prefixText: '₹ ', prefixStyle: serif(32, c: C.gold),
+                      suffixText: '/ g', suffixStyle: inter(14, c: C.mute),
+                      border: InputBorder.none,
+                    ),
+                  ),
+                ),
+                Pill(
+                  height: 44, selected: true, accent: C.gold,
+                  onTap: () {
+                    final v = double.tryParse(ctrl.text.replaceAll(',', ''));
+                    final spotLocal = x.price / ozG * a.rate;
+                    if (v == null || v <= 0 || spotLocal <= 0) return;
+                    final prem = v / spotLocal;
+                    if (prem < 0.8 || prem > 2) return; // reject typos
+                    a.update((s) { s.local = true; s.calib[m.name] = prem; });
+                    Navigator.of(ctx).pop();
+                  },
+                  child: const Text('Match'),
+                ),
+              ]),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 4, 16, 10),
+              child: Text('Enter the price you see in SafeGold now. Insight keeps it in step with the live market.',
+                  style: inter(12, c: C.mute, h: 1.4)),
+            ),
+          ]),
+        ),
+      );
+    },
+  );
+}
+
 /// Which Indian reference the INR price follows.
 String _source(AppState a, Metal m) {
+  if (a.s.calib.containsKey(m.name)) return m == Metal.gold ? 'SafeGold' : 'Custom';
   final p = a.premiums;
   switch (m) {
     case Metal.gold: return p['gold_paytm'] == 1 ? 'Paytm' : (p.containsKey('gold') ? 'Groww' : 'India est.');
@@ -104,8 +187,6 @@ class _TodayPageState extends State<TodayPage> {
                       _ChartCard(a: a, metal: m, tone: _chartTone(a.chartFor(m), a.snaps[m]!.dayChg)),
                       const SizedBox(height: 16),
                       _SignalCard(x: a.snaps[m]!, l: l),
-                      const SizedBox(height: 16),
-                      _WhyCard(x: a.snaps[m]!, l: l),
                     ],
                     if (a.offline) Padding(
                       padding: const EdgeInsets.only(top: 16),
@@ -295,7 +376,7 @@ class _PriceBlock extends StatelessWidget {
             Semantics(
               button: true, label: a.s.local ? 'Following ${_source(a, x.metal)} rate. Tap for international spot' : 'International spot price. Tap for India rate',
               child: GestureDetector(
-                onTap: () { HapticFeedback.selectionClick(); a.update((s) => s.local = !s.local); },
+                onTap: () { HapticFeedback.selectionClick(); _sourceSheet(context, a, x); },
                 child: Container(
                   height: 26, padding: const EdgeInsets.symmetric(horizontal: 10), alignment: Alignment.center,
                   decoration: BoxDecoration(borderRadius: BorderRadius.circular(13),
@@ -496,12 +577,9 @@ class _SignalCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final sd = x.sig == Sig.buy ? 1 : (x.sig == Sig.sell ? -1 : 0);
     final tone = C.tone(sd);
-    final inds = <(String, String, int)>[
-      (tr(l, 'trend'), x.trend > 0 ? '↑' : (x.trend < 0 ? '↓' : '→'), x.trend),
-      ('MA 20', x.aboveMa20 ? '↑' : '↓', x.aboveMa20 ? 1 : -1),
-      ('RSI', x.rsi.round().toString(), x.rsi > 70 ? -1 : (x.rsi < 30 ? 1 : 0)),
-      ('USD', x.dxyChg < 0 ? '↓' : (x.dxyChg > 0 ? '↑' : '→'), x.dxyChg < 0 ? 1 : (x.dxyChg > 0 ? -1 : 0)),
-    ];
+    final rs = _signalReasons(x);
+    final ups = rs.where((r) => r.$2 > 0).length, downs = rs.where((r) => r.$2 < 0).length;
+    final summary = '$ups of ${rs.length} factors point up, $downs point down';
     return Glass(
       glow: x.flipped ? [BoxShadow(color: tone.withValues(alpha: 0.18), blurRadius: 40)] : null,
       borderColor: x.flipped ? tone.withValues(alpha: 0.4) : null,
@@ -532,25 +610,50 @@ class _SignalCard extends StatelessWidget {
             ]),
           ),
         ]),
-        const SizedBox(height: 18),
-        Row(children: [
-          for (final (k, v, s) in inds)
-            Expanded(
-              child: Container(
-                margin: const EdgeInsetsDirectional.only(end: 8),
-                padding: const EdgeInsets.symmetric(vertical: 10),
-                decoration: BoxDecoration(borderRadius: BorderRadius.circular(14), color: const Color(0x0DFFFFFF)),
-                child: Column(children: [
-                  Text(v, style: inter(16, w: FontWeight.w600, c: s == 0 ? C.mute : C.tone(s))),
-                  const SizedBox(height: 4),
-                  Text(k, style: inter(11, c: C.mute), maxLines: 1, overflow: TextOverflow.ellipsis),
-                ]),
+        const SizedBox(height: 16),
+        Align(alignment: AlignmentDirectional.centerStart, child: Text(summary, style: inter(12, c: C.mute))),
+        const SizedBox(height: 8),
+        for (final (text, sgn) in rs)
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 6),
+            child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Container(
+                width: 22, height: 22, alignment: Alignment.center,
+                decoration: BoxDecoration(shape: BoxShape.circle, color: (sgn == 0 ? C.mute : C.tone(sgn)).withValues(alpha: 0.14)),
+                child: Text(sgn > 0 ? '▲' : (sgn < 0 ? '▼' : '•'), style: inter(9, c: sgn == 0 ? C.mute : C.tone(sgn))),
               ),
-            ),
-        ]),
+              const SizedBox(width: 10),
+              Expanded(child: Text(text, style: inter(14, c: C.sub, h: 1.4))),
+            ]),
+          ),
       ]),
     );
   }
+}
+
+/// Plain-language reasons behind the signal: (text, +1 bullish / -1 bearish / 0 neutral).
+List<(String, int)> _signalReasons(Snapshot x) {
+  final out = <(String, int)>[
+    (x.trend > 0 ? 'The 20-day trend is rising' : (x.trend < 0 ? 'The 20-day trend is falling' : 'The 20-day trend is flat'), x.trend),
+    (x.aboveMa20 ? 'Price is above its 20-day average' : 'Price is below its 20-day average', x.aboveMa20 ? 1 : -1),
+    (x.maCross ? 'Short-term average is above the 50-day, so the uptrend holds' : 'Short-term average is below the 50-day, so the downtrend holds', x.maCross ? 1 : -1),
+  ];
+  final r = x.rsi.round();
+  if (x.rsi > 70) {
+    out.add(('Momentum is overbought (RSI $r), so a pullback is likely', -1));
+  } else if (x.rsi < 30) {
+    out.add(('Momentum is oversold (RSI $r), so a bounce is possible', 1));
+  } else {
+    out.add((x.rsi >= 50 ? 'Momentum is positive (RSI $r)' : 'Momentum is weak (RSI $r)', x.rsi >= 50 ? 1 : -1));
+  }
+  if (x.dxyChg < -0.002) {
+    out.add(('The US dollar weakened today, which supports metals', 1));
+  } else if (x.dxyChg > 0.002) {
+    out.add(('The US dollar strengthened today, which weighs on metals', -1));
+  } else {
+    out.add(('The US dollar is steady', 0));
+  }
+  return out;
 }
 
 class _Ring extends CustomPainter {
@@ -565,77 +668,4 @@ class _Ring extends CustomPainter {
   }
   @override
   bool shouldRepaint(_Ring o) => o.v != v || o.c != c;
-}
-
-class _WhyCard extends StatefulWidget {
-  final Snapshot x;
-  final String l;
-  const _WhyCard({required this.x, required this.l});
-  @override
-  State<_WhyCard> createState() => _WhyCardState();
-}
-
-class _WhyCardState extends State<_WhyCard> {
-  int? open;
-
-  @override
-  void didUpdateWidget(_WhyCard old) {
-    super.didUpdateWidget(old);
-    if (old.x.metal != widget.x.metal) open = null;
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final x = widget.x, l = widget.l;
-    final chg = x.eventChg;
-    final calm = chg.abs() < 0.002;
-    final ev = calm ? tr(l, 'calm') : '${chg >= 0 ? '+' : '−'}${pct(chg)} · ${x.eventIsHour ? '1h' : '24h'}';
-    return Glass(
-      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Row(children: [
-          Expanded(child: Text(tr(l, 'why').toUpperCase(), style: label())),
-          Directionality(textDirection: TextDirection.ltr, child: Text(ev, style: inter(13, w: FontWeight.w600, c: calm ? C.mute : C.tone(chg)))),
-        ]),
-        const SizedBox(height: 8),
-        for (var i = 0; i < x.reasons.length; i++)
-          Semantics(
-            button: true, expanded: open == i,
-            child: GestureDetector(
-              behavior: HitTestBehavior.opaque,
-              onTap: () => setState(() => open = open == i ? null : i),
-              child: AnimatedContainer(
-                duration: const Duration(milliseconds: 220),
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
-                decoration: BoxDecoration(borderRadius: BorderRadius.circular(16), color: open == i ? const Color(0x0FFFFFFF) : const Color(0x00000000)),
-                child: AnimatedSize(
-                  duration: const Duration(milliseconds: 220), curve: Curves.easeOut, alignment: Alignment.topCenter,
-                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                    Row(children: [
-                      Expanded(child: Text(tr(l, x.reasons[i].key), style: inter(15))),
-                      Semantics(
-                        label: ['', 'Low', 'Medium', 'High'][x.reasons[i].level] + ' likelihood',
-                        child: Row(children: [
-                          for (var k = 1; k <= 3; k++)
-                            Container(width: 14, height: 4, margin: const EdgeInsetsDirectional.only(start: 3),
-                              decoration: BoxDecoration(borderRadius: BorderRadius.circular(2),
-                                color: k <= x.reasons[i].level ? C.text : const Color(0x24FFFFFF))),
-                        ]),
-                      ),
-                    ]),
-                    if (open == i) ...[
-                      const SizedBox(height: 6),
-                      Text(tr(l, '${x.reasons[i].key}_x'), style: inter(13, c: const Color(0xFFB4BAC4), h: 1.45)),
-                      if (x.reasons[i].headline != null) ...[
-                        const SizedBox(height: 6),
-                        Text('“${x.reasons[i].headline}”', style: inter(12, c: C.mute, h: 1.4), maxLines: 2, overflow: TextOverflow.ellipsis),
-                      ],
-                    ],
-                  ]),
-                ),
-              ),
-            ),
-          ),
-      ]),
-    );
-  }
 }
